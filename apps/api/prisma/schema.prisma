@@ -1,0 +1,389 @@
+// =============================================================================
+// AI YouTube Auto Clipper — Prisma Schema
+// =============================================================================
+// Based on: DATABASE-DESIGN.md v1.0
+// Database: PostgreSQL 16+
+// Architecture: Clean Architecture / Domain-Driven Design
+// Target scale: 100,000+ users
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// ENUMS — PostgreSQL native enums mapped from DATABASE-DESIGN.md CHECK constraints
+// =============================================================================
+
+/// User subscription plan tiers
+enum PlanTier {
+  free
+  starter
+  pro
+  enterprise
+}
+
+/// Subscription lifecycle status
+enum SubscriptionStatus {
+  active
+  past_due
+  canceled
+  expired
+}
+
+/// Project processing pipeline states
+/// Flow: pending → downloading → downloaded → transcribing → transcribed
+///       → analyzing → analyzed → generating_clips → completed
+/// Terminal: failed | cancelled
+enum ProjectStatus {
+  pending
+  downloading
+  downloaded
+  transcribing
+  transcribed
+  analyzing
+  analyzed
+  generating_clips
+  completed
+  failed
+  cancelled
+}
+
+/// Clip generation lifecycle states
+enum ClipStatus {
+  pending
+  queued
+  generating
+  completed
+  failed
+}
+
+/// Async job execution states (BullMQ)
+enum JobStatus {
+  queued
+  active
+  completed
+  failed
+  delayed
+}
+
+/// Credit transaction type (positive = credit added, negative = deducted)
+enum CreditTransactionType {
+  subscription
+  top_up
+  admin_grant
+  consumption
+  refund
+  rollover
+}
+
+// =============================================================================
+// MODELS — 11 tables, production-ready
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Model: User
+// Domain: Authentication & Authorization
+// Relations: 1:1 Profile, 1:1 Subscription, 1:1 Credits,
+//            1:N RefreshToken, 1:N Project, 1:N Clip,
+//            1:N UsageLog, 1:N CreditTransaction
+// ---------------------------------------------------------------------------
+model User {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email            String    @unique @db.VarChar(320)
+  passwordHash     String    @map("password_hash") @db.VarChar(255)
+  isActive         Boolean   @default(true) @map("is_active")
+  isAdmin          Boolean   @default(false) @map("is_admin")
+  emailVerifiedAt  DateTime? @map("email_verified_at") @db.Timestamptz()
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  profile          Profile?
+  subscription     Subscription?
+  credits          Credits?
+  refreshTokens    RefreshToken[]
+  projects         Project[]
+  clips            Clip[]
+  usageLogs        UsageLog[]
+  creditTransactions CreditTransaction[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Model: Profile
+// Domain: User Management
+// Relation: 1:1 with User
+// Note: Separated from User for Clean Architecture (auth vs display data)
+// ---------------------------------------------------------------------------
+model Profile {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @unique @map("user_id") @db.Uuid
+  displayName String   @map("display_name") @db.VarChar(100)
+  avatarKey   String?  @map("avatar_key") @db.VarChar(255)
+  timezone    String   @default("UTC") @db.VarChar(50)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+// ---------------------------------------------------------------------------
+// Model: RefreshToken
+// Domain: Authentication
+// Relation: N:1 with User
+// Note: SHA-256 hash of refresh token stored, not raw token.
+//       Rotation: revoke old + issue new on every refresh.
+// ---------------------------------------------------------------------------
+model RefreshToken {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(255)
+  deviceInfo String?   @map("device_info") @db.VarChar(500)
+  ipAddress  String?   @map("ip_address") @db.Inet
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz()
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz()
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_refresh_tokens_user_id")
+  @@index([expiresAt], map: "idx_refresh_tokens_expires_at")
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Model: Subscription
+// Domain: Billing & Plans
+// Relation: 1:1 with User
+// Note: One active subscription per user. Plan dictates credit allocation,
+//       feature flags, and processing priority.
+// ---------------------------------------------------------------------------
+model Subscription {
+  id         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String             @unique @map("user_id") @db.Uuid
+  plan       PlanTier           @default(free)
+  status     SubscriptionStatus @default(active)
+  startsAt   DateTime           @map("starts_at") @db.Timestamptz()
+  endsAt     DateTime?          @map("ends_at") @db.Timestamptz()
+  canceledAt DateTime?          @map("canceled_at") @db.Timestamptz()
+  createdAt  DateTime           @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt  DateTime           @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([plan], map: "idx_subscriptions_plan")
+  @@map("subscriptions")
+}
+
+// ---------------------------------------------------------------------------
+// Model: Credits
+// Domain: Billing & Credits
+// Relation: 1:1 with User
+// Note: Single-row wallet per user. balance >= 0 enforced by CHECK constraint.
+//       Rollover credits tracked separately with expiry.
+// ---------------------------------------------------------------------------
+model Credits {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String    @unique @map("user_id") @db.Uuid
+  balance           Int       @default(0) @map("balance")
+  rolloverCredit    Int       @default(0) @map("rollover_credit")
+  rolloverExpiresAt DateTime? @map("rollover_expires_at") @db.Timestamptz()
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("credits")
+}
+
+// ---------------------------------------------------------------------------
+// Model: CreditTransaction
+// Domain: Billing & Credits
+// Relation: N:1 with User
+// Note: Immutable ledger. Positive amount = credit added, negative = deducted.
+//       Never UPDATE — only INSERT. Used for audit, compliance, and analytics.
+// ---------------------------------------------------------------------------
+model CreditTransaction {
+  id          String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String                @map("user_id") @db.Uuid
+  type        CreditTransactionType
+  amount      Int
+  description String?               @db.VarChar(500)
+  metadata    Json?                 @db.JsonB
+  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz()
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)], map: "idx_ct_user_id_created_at")
+  @@map("credit_transactions")
+}
+
+// ---------------------------------------------------------------------------
+// Model: Project
+// Domain: Project & Processing
+// Relation: N:1 with User, 1:N with TranscriptSegment, 1:N with Clip,
+//           1:N with UsageLog, 1:N with JobRecord
+// Note: Core entity. One YouTube URL = one Project.
+//       metadata JSONB stores YouTube metadata + AI analysis summary.
+// ---------------------------------------------------------------------------
+model Project {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String        @map("user_id") @db.Uuid
+  youtubeUrl       String        @map("youtube_url") @db.VarChar(2048)
+  youtubeVideoId   String        @map("youtube_video_id") @db.VarChar(20)
+  title            String?       @db.VarChar(500)
+  durationSeconds  Int?          @map("duration_seconds")
+  thumbnailUrl     String?       @map("thumbnail_url") @db.VarChar(2048)
+  language         String?       @db.VarChar(20)
+  status           ProjectStatus @default(pending)
+  errorMessage     String?       @map("error_message") @db.Text
+  errorCode        String?       @map("error_code") @db.VarChar(50)
+  creditsConsumed  Int           @default(0) @map("credits_consumed")
+  metadata         Json?         @db.JsonB
+  startedAt        DateTime?     @map("started_at") @db.Timestamptz()
+  completedAt      DateTime?     @map("completed_at") @db.Timestamptz()
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz()
+
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transcriptSegments TranscriptSegment[]
+  clips              Clip[]
+  usageLogs          UsageLog[]
+  jobRecords         JobRecord[]
+
+  @@index([userId, status], map: "idx_projects_user_id_status")
+  @@index([userId, createdAt(sort: Desc)], map: "idx_projects_user_id_created_at")
+  @@index([youtubeVideoId], map: "idx_projects_youtube_video_id")
+  @@index([status], map: "idx_projects_status")
+  @@index([createdAt(sort: Desc)], map: "idx_projects_created_at")
+  @@map("projects")
+}
+
+// ---------------------------------------------------------------------------
+// Model: TranscriptSegment
+// Domain: Processing / Transcription
+// Relation: N:1 with Project
+// Note: Speech-to-text result from Faster Whisper.
+//       Highest write volume table (up to 300 segments per video).
+//       segment_index ensures ordering and prevents duplicates.
+// ---------------------------------------------------------------------------
+model TranscriptSegment {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId    String   @map("project_id") @db.Uuid
+  segmentIndex Int      @map("segment_index")
+  text         String   @db.Text
+  startTime    Float    @map("start_time") @db.DoublePrecision
+  endTime      Float    @map("end_time") @db.DoublePrecision
+  confidence   Float?   @db.DoublePrecision
+  speaker      String?  @db.VarChar(100)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, segmentIndex], map: "uq_ts_project_id_segment_idx")
+  @@map("transcript_segments")
+}
+
+// ---------------------------------------------------------------------------
+// Model: Clip
+// Domain: Clip Output
+// Relation: N:1 with Project, N:1 with User (denormalized), 1:N with JobRecord
+// Note: Generated clip result. video_key references MinIO/S3 object.
+//       engagement_score 1–100. Status tracks clip rendering pipeline.
+// ---------------------------------------------------------------------------
+model Clip {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId         String    @map("project_id") @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  title             String    @db.VarChar(500)
+  startTime         Float     @map("start_time") @db.DoublePrecision
+  endTime           Float     @map("end_time") @db.DoublePrecision
+  durationSeconds   Float     @map("duration_seconds") @db.DoublePrecision
+  engagementScore   Int?      @map("engagement_score")
+  transcriptSnippet String?   @map("transcript_snippet") @db.Text
+  aiRationale       String?   @map("ai_rationale") @db.Text
+  videoKey          String?   @map("video_key") @db.VarChar(255)
+  subtitleKey       String?   @map("subtitle_key") @db.VarChar(255)
+  thumbnailKey      String?   @map("thumbnail_key") @db.VarChar(255)
+  status            ClipStatus @default(pending)
+  errorMessage      String?   @map("error_message") @db.Text
+  retryCount        Int       @default(0) @map("retry_count")
+  maxRetries        Int       @default(3) @map("max_retries")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz()
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobRecords JobRecord[]
+
+  @@index([projectId, engagementScore(sort: Desc)], map: "idx_clips_project_id_score")
+  @@index([userId, createdAt(sort: Desc)], map: "idx_clips_user_id_created_at")
+  @@index([status], map: "idx_clips_status")
+  @@map("clips")
+}
+
+// ---------------------------------------------------------------------------
+// Model: UsageLog
+// Domain: Analytics & Audit
+// Relation: N:1 with User, N:1 with Project (nullable)
+// Note: Immutable audit trail. One row per significant user action.
+//       SET NULL on project delete so logs remain for analytics.
+// ---------------------------------------------------------------------------
+model UsageLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  projectId   String?  @map("project_id") @db.Uuid
+  action      String   @db.VarChar(50)
+  creditsUsed Int      @default(0) @map("credits_used")
+  metadata    Json?    @db.JsonB
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)], map: "idx_ul_user_id_created_at")
+  @@index([projectId], map: "idx_ul_project_id")
+  @@map("usage_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Model: JobRecord
+// Domain: Processing / Observability
+// Relation: N:1 with Project (nullable), N:1 with Clip (nullable)
+// Note: Tracks BullMQ job lifecycle for observability and debugging.
+//       SET NULL on project/clip delete so records remain for debugging.
+// ---------------------------------------------------------------------------
+model JobRecord {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  bullmqJobId   String    @map("bullmq_job_id") @db.VarChar(100)
+  queueName     String    @map("queue_name") @db.VarChar(50)
+  jobName       String    @map("job_name") @db.VarChar(100)
+  projectId     String?   @map("project_id") @db.Uuid
+  clipId        String?   @map("clip_id") @db.Uuid
+  status        JobStatus @default(queued)
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(3) @map("max_attempts")
+  errorMessage  String?   @map("error_message") @db.Text
+  result        Json?     @db.JsonB
+  startedAt     DateTime? @map("started_at") @db.Timestamptz()
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz()
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  clip    Clip?    @relation(fields: [clipId], references: [id], onDelete: SetNull)
+
+  @@index([bullmqJobId], map: "idx_jr_bullmq_job_id")
+  @@index([queueName, status], map: "idx_jr_queue_name_status")
+  @@index([projectId], map: "idx_jr_project_id")
+  @@index([clipId], map: "idx_jr_clip_id")
+  @@map("job_records")
+}

@@ -1,0 +1,16 @@
+{
+  "name": "clip-project",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @clip-project/api --filter @clip-project/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "prisma:generate": "pnpm --filter @clip-project/api prisma:generate",
+    "prisma:migrate": "pnpm --filter @clip-project/api prisma:migrate"
+  }
+}

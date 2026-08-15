@@ -1,0 +1,66 @@
+# =============================================================================
+# AI YouTube Auto Clipper — Worker: Download
+# =============================================================================
+# Requires: yt-dlp (Python), FFmpeg
+# Job:     download queue — yt-dlp download + upload raw video to MinIO
+# =============================================================================
+
+# Build shared Node.js base first
+FROM node:22-alpine AS deps
+WORKDIR /app
+RUN corepack enable pnpm && corepack prepare pnpm@latest --activate
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
+COPY apps/api/package.json apps/api/
+COPY packages/shared/package.json packages/shared/
+RUN pnpm install --frozen-lockfile --prod=false
+
+FROM node:22-alpine AS builder
+WORKDIR /app
+RUN corepack enable pnpm && corepack prepare pnpm@latest --activate
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
+COPY --from=deps /app/packages/shared/node_modules ./packages/shared/node_modules
+COPY . .
+RUN pnpm --filter @clip-project/api prisma:generate
+RUN pnpm --filter @clip-project/api build
+
+# ---------------------------------------------------------------------------
+# Worker: Download (yt-dlp + FFmpeg)
+# ---------------------------------------------------------------------------
+FROM node:22-alpine
+WORKDIR /app
+
+RUN apk add --no-cache \
+    dumb-init \
+    ffmpeg \
+    python3 \
+    py3-pip \
+    curl
+
+# Install yt-dlp via pip
+RUN pip3 install --no-cache-dir --break-system-packages yt-dlp
+
+RUN addgroup --system --gid 1001 clipgroup && \
+    adduser --system --uid 1001 clipuser && \
+    chown -R clipuser:clipgroup /app
+
+RUN corepack enable pnpm && corepack prepare pnpm@latest --activate
+
+COPY --from=builder /app/apps/api/package.json apps/api/
+COPY --from=builder /app/packages/shared/package.json packages/shared/
+COPY --from=builder /app/package.json \
+     /app/pnpm-workspace.yaml \
+     /app/pnpm-lock.yaml ./
+COPY --from=builder /app/node_modules node_modules
+COPY --from=builder /app/apps/api/node_modules apps/api/node_modules
+COPY --from=builder /app/packages/shared/node_modules packages/shared/node_modules
+COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
+COPY --from=builder /app/node_modules/.prisma node_modules/.prisma
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+
+USER clipuser
+ENTRYPOINT ["dumb-init", "--"]
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
+  CMD pgrep -f "download.worker" || exit 1
+
+CMD ["node", "apps/api/dist/workers/download.worker.js"]
