@@ -59,11 +59,11 @@ COPY --from=builder /app/package.json \
      /app/pnpm-lock.yaml ./
 
 # Production node_modules (for runtime deps like @nestjs/*, prisma, etc.)
-RUN pnpm install --frozen-lockfile --prod
+RUN pnpm install --frozen-lockfile --prod=false
 
 # Copy Prisma artifacts (generated client + migrations)
 COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
-
+RUN pnpm --filter @clip-project/api prisma:generate --schema prisma/schema.prisma
 
 # Copy build output
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
