@@ -13,6 +13,6 @@ export class SubtitleController {
   async get(@Req() request: Request & { user: AuthenticatedUser }, @Param('id') id: string) {
     const clip = await this.prisma.clip.findFirst({ where: { id, userId: request.user.id } });
     if (!clip || !clip.subtitleKey) return { error: 'Subtitle not ready' };
-    return { url: await this.storage.preview(request.user.id, 'subtitles', clip.subtitleKey), expiresIn: 3600 };
+    return { url: await this.storage.previewUrl(request.user.id, 'subtitles', clip.subtitleKey), expiresIn: 3600 };
   }
 }

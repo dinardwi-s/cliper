@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { CleanupModule } from './cleanup/cleanup.module';
+import { CacheModule } from './cache/cache.module';
 import { AiModule } from './ai/ai.module';
 import { MediaModule } from './media/media.module';
 import { HistoryModule } from './history/history.module';
@@ -12,6 +14,6 @@ import { YoutubeModule } from './youtube/youtube.module';
 import { TranscriptModule } from './transcript/transcript.module';
 
 @Module({
-  imports: [PrismaModule, QueueModule, AiModule, MediaModule, AuthModule, ProjectModule, StorageModule, YoutubeModule, TranscriptModule, HistoryModule, HealthModule],
+  imports: [PrismaModule, CacheModule, CleanupModule, QueueModule, AiModule, MediaModule, AuthModule, ProjectModule, StorageModule, YoutubeModule, TranscriptModule, HistoryModule, HealthModule],
 })
 export class AppModule {}

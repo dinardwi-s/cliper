@@ -350,7 +350,8 @@ CLAUDE.md is the single source of truth for project progress.
 - Stage 9 - IN PROGRESS (implementation complete; runtime OpenAI/Redis/PostgreSQL verification blocked by unavailable Docker)
 - Stage 10 - IN PROGRESS (implementation complete; runtime FFmpeg/MinIO/Redis/PostgreSQL verification blocked by unavailable Docker)
 - Stage 11 - IN PROGRESS (implementation complete; runtime FFmpeg/MinIO/Redis/PostgreSQL verification blocked by unavailable Docker)
-- Stage 12 - IN PROGRESS (implementation complete; runtime PostgreSQL verification passed; MinIO verification pending image pull)
+- Stage 12 - IN PROGRESS (implementation complete; runtime PostgreSQL verification passed; local filesystem storage verified)
+- Stage 13 - COMPLETE
 
 ## Stage 1 Completion Summary
 
@@ -1032,8 +1033,107 @@ Stage 12 - History.
 - Workspace lint command: passed.
 - API build: passed.
 - Web build: passed.
-- Runtime PostgreSQL/MinIO verification: blocked because Docker is unavailable.
+- Runtime PostgreSQL verification: passed previously.
+- Local filesystem storage verification: passed.
+- MinIO verification is no longer applicable to local development.
 
 ### Next Stage
 
 Stage 13 - Optimization.
+
+
+## Infrastructure Adjustment: Local Filesystem Storage
+
+### Status
+
+COMPLETE. This adjustment does not start Stage 13.
+
+### Changed
+
+- Replaced local MinIO implementation with `LocalFilesystemStorageService`.
+- Added `StorageAdapter` abstraction so future S3-compatible storage can replace the adapter.
+- Storage root defaults to `storage`; Docker sets `STORAGE_LOCAL_PATH=/app/storage`.
+- Docker mounts project `./storage` to `/app/storage` for persistence.
+- Removed MinIO and MinIO init services from local Compose.
+- Removed MinIO storage environment variables and worker dependencies.
+- PostgreSQL stores only object metadata and keys; video bytes remain on filesystem.
+- Preview uses authenticated API streaming, not public URLs or S3 signed URLs.
+
+### Verification
+
+- Docker Compose configuration: passed.
+- Typecheck: passed.
+- API build: passed.
+- Filesystem upload: passed.
+- Filesystem read: passed.
+- Preview URL generation: passed.
+- Read stream: passed.
+- Delete: passed.
+- Storage directory contains no test files after cleanup.
+
+### New Environment Variables
+
+- `STORAGE_LOCAL_PATH` — filesystem storage root; defaults to `storage`.
+
+### Next Stage
+
+Remain at Stage 12 until explicitly instructed to start Stage 13.
+
+
+## Stage 13 Completion Summary
+
+### Implemented
+
+- Global HTTP logging interceptor with request duration.
+- Global exception filter with consistent error payloads and server-side error logging.
+- Redis cache service with TTL and prefix invalidation.
+- History query cache with 15-second TTL.
+- Local storage cleanup service for expired raw video files.
+- Health monitoring endpoint: `GET /api/health/monitor`.
+
+### Modified Files
+
+- `apps/api/src/main.ts`
+- `apps/api/src/app.module.ts`
+- `apps/api/src/history/history.service.ts`
+- `apps/api/package.json`
+- `CLAUDE.md`
+
+### Newly Created Files
+
+- `apps/api/src/common/logging.interceptor.ts`
+- `apps/api/src/common/global-exception.filter.ts`
+- `apps/api/src/cache/cache.service.ts`
+- `apps/api/src/cache/cache.module.ts`
+- `apps/api/src/cleanup/cleanup.service.ts`
+- `apps/api/src/cleanup/cleanup.module.ts`
+- `apps/api/src/health/monitor.service.ts`
+- `apps/api/src/health/monitor.controller.ts`
+
+### Database Migrations
+
+- None.
+
+### New Environment Variables
+
+- `STORAGE_TEMP_RETENTION_HOURS` — raw local storage retention period; defaults to 72 hours.
+- `REDIS_URL` — used by cache service.
+
+### Architectural Decisions
+
+- Cache is best-effort and does not replace PostgreSQL as source of truth.
+- Exception responses are normalized without exposing internal stack traces.
+- Cleanup is isolated from request handling and can be scheduled by the existing cleanup worker.
+- Monitoring exposes dependency state without exposing credentials or internals.
+
+### Verification
+
+- Workspace typecheck: passed.
+- Workspace lint: passed.
+- API build: passed.
+- Docker Compose config: passed.
+- Local filesystem upload/read/stream/delete: passed.
+
+### Next Stage
+
+Commercial Version.

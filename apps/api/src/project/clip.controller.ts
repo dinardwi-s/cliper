@@ -26,13 +26,13 @@ export class ClipController {
   async download(@Req() request: Request & { user: AuthenticatedUser }, @Param('id') id: string) {
     const clip = await this.prisma.clip.findFirst({ where: { id, userId: request.user.id } });
     if (!clip || !clip.videoKey) return { error: 'Clip not ready' };
-    return { url: await this.storage.preview(request.user.id, 'clips', clip.videoKey), expiresIn: 3600, filename: `${clip.id}.mp4` };
+    return { url: await this.storage.previewUrl(request.user.id, 'clips', clip.videoKey), expiresIn: 3600, filename: `${clip.id}.mp4` };
   }
 
   @Get(':id/preview')
   async preview(@Req() request: Request & { user: AuthenticatedUser }, @Param('id') id: string) {
     const clip = await this.prisma.clip.findFirst({ where: { id, userId: request.user.id } });
     if (!clip || !clip.videoKey) return { error: 'Clip not ready' };
-    return { url: await this.storage.preview(request.user.id, 'clips', clip.videoKey), expiresIn: 3600 };
+    return { url: await this.storage.previewUrl(request.user.id, 'clips', clip.videoKey), expiresIn: 3600 };
   }
 }
