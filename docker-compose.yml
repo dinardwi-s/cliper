@@ -83,7 +83,10 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-change-in-production}
       JWT_EXPIRATION: 15m
       JWT_REFRESH_EXPIRATION: 7d
+      AI_PROVIDER: ${AI_PROVIDER:-gemini}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       WHISPER_ENDPOINT: ${WHISPER_ENDPOINT:-http://worker-transcribe:5555}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       RATE_LIMIT_TTL: 60
@@ -221,7 +224,10 @@ services:
       STORAGE_BUCKET_CLIPS: clips
       STORAGE_BUCKET_SUBTITLES: subtitles
       STORAGE_BUCKET_THUMBNAILS: thumbnails
+      AI_PROVIDER: ${AI_PROVIDER:-gemini}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       OPENAI_MODEL: gpt-4o
       OPENAI_MAX_TOKENS: 4000
     depends_on:
