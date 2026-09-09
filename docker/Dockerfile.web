@@ -69,7 +69,7 @@ COPY --from=builder /app/node_modules node_modules
 # Copy build output
 COPY --from=builder /app/apps/web/.next apps/web/.next
 COPY --from=builder /app/apps/web/next.config.js apps/web/
-COPY --from=builder /app/package.json ./
+COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod=false
 
 USER clipuser
