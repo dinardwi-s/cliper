@@ -29,6 +29,7 @@ RUN corepack enable pnpm && corepack prepare pnpm@latest --activate
 COPY --from=deps /app/node_modules ./node_modules
 
 COPY . .
+RUN pnpm install --frozen-lockfile --prod=false
 
 # Generate Prisma client
 RUN pnpm --filter @clip-project/api prisma:generate

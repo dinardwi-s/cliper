@@ -35,6 +35,7 @@ COPY --from=deps /app/node_modules ./node_modules
 
 # Copy source code
 COPY . .
+RUN pnpm install --frozen-lockfile --prod=false
 
 # Set build-time env vars (NEXT_PUBLIC_* embedded at build time)
 ARG NEXT_PUBLIC_API_URL=http://localhost:4000/api/v1
