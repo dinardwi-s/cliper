@@ -1,10 +1,3 @@
-# =============================================================================
-# AI YouTube Auto Clipper — Worker: Transcribe
-# =============================================================================
-# Requires: Faster Whisper (Python), FFmpeg (audio extraction)
-# Job:     transcribe queue — extract audio + STT with word-level timestamps
-# =============================================================================
-
 FROM node:22-alpine AS deps
 WORKDIR /app
 RUN corepack enable pnpm && corepack prepare pnpm@latest --activate
@@ -22,49 +15,20 @@ RUN pnpm install --frozen-lockfile --prod=false
 RUN pnpm --filter @clip-project/api prisma:generate
 RUN pnpm --filter @clip-project/api build
 
-# ---------------------------------------------------------------------------
-# Worker: Transcribe (Faster Whisper + FFmpeg)
-# ---------------------------------------------------------------------------
-FROM node:22-alpine
+FROM python:3.11-slim
 WORKDIR /app
-
-RUN apk add --no-cache \
-    dumb-init \
-    ffmpeg \
-    python3 \
-    py3-pip \
-    libstdc++
-
-# Install Faster Whisper and its dependencies
-# Large model downloaded at build time via WHISPER_MODEL env
-RUN pip3 install --no-cache-dir --break-system-packages \
-    faster-whisper \
-    numpy
-
-# Pre-download the model at build time to avoid runtime download
-ARG WHISPER_MODEL=large-v3
-RUN python3 -c "from faster_whisper import WhisperModel; \
-    WhisperModel('${WHISPER_MODEL}', device='cpu', compute_type='int8')" || true
-
-RUN addgroup --system --gid 1001 clipgroup && \
-    adduser --system --uid 1001 clipuser && \
-    chown -R clipuser:clipgroup /app
-
-RUN corepack enable pnpm && corepack prepare pnpm@latest --activate
-
+RUN apt-get update && apt-get install -y --no-install-recommends curl ffmpeg dumb-init nodejs npm && rm -rf /var/lib/apt/lists/*
+RUN npm install -g corepack && corepack enable pnpm && corepack prepare pnpm@9.15.4 --activate
+RUN pip install --no-cache-dir faster-whisper numpy
+RUN groupadd --system --gid 1001 clipgroup && useradd --system --uid 1001 --gid clipgroup clipuser
+COPY --from=builder /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml ./
 COPY --from=builder /app/apps/api/package.json apps/api/
 COPY --from=builder /app/packages/shared/package.json packages/shared/
-COPY --from=builder /app/package.json \
-     /app/pnpm-workspace.yaml \
-     /app/pnpm-lock.yaml ./
-COPY --from=builder /app/node_modules node_modules
-COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
-COPY --from=builder /app/apps/api/dist ./apps/api/dist
-COPY --from=builder /app/apps/api/python ./apps/api/python
-
+COPY --from=builder /app/apps/api/prisma apps/api/prisma/
+COPY --from=builder /app/apps/api/python apps/api/python/
+COPY --from=builder /app/apps/api/dist apps/api/dist/
+RUN pnpm install --frozen-lockfile --prod=false && pnpm --filter @clip-project/api prisma:generate --schema prisma/schema.prisma
+RUN chown -R clipuser:clipgroup /app
 USER clipuser
 ENTRYPOINT ["dumb-init", "--"]
-HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-  CMD pgrep -f "transcribe.worker" || exit 1
-
 CMD ["node", "apps/api/dist/workers/transcribe.worker.js"]
