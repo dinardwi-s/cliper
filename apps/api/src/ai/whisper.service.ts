@@ -14,12 +14,15 @@ export interface TranscriptResult {
 export class WhisperService {
   async transcribe(audioPath: string): Promise<TranscriptResult> {
     try {
-      const { stdout } = await execFileAsync('python3', [process.env.WHISPER_RUNNER ?? 'python/faster_whisper_runner.py', audioPath], { timeout: 6 * 60 * 60 * 1000, maxBuffer: 20 * 1024 * 1024 });
+      const runner = process.env.WHISPER_RUNNER ?? 'python/faster_whisper_runner.py';
+      const { stdout } = await execFileAsync('python3', [runner, audioPath], { timeout: 6 * 60 * 60 * 1000, maxBuffer: 20 * 1024 * 1024 });
       const result = JSON.parse(stdout) as TranscriptResult;
       if (!result.language || !Array.isArray(result.segments)) throw new Error('Invalid transcription response');
       return result;
-    } catch {
-      throw new ServiceUnavailableException('Speech transcription failed');
+    } catch (error) {
+      console.error('WhisperService execution error:', error);
+      const message = error instanceof Error ? error.message : 'Speech transcription failed';
+      throw new ServiceUnavailableException(message);
     }
   }
 }

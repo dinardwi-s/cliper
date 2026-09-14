@@ -11,6 +11,7 @@
     "worker:transcribe": "node dist/workers/transcribe.worker.js",
     "worker:analyze": "node dist/workers/analyze.worker.js",
     "worker:clipgen": "node dist/workers/clipgen.worker.js",
+    "worker:cleanup": "node dist/workers/cleanup.worker.js",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "prisma:generate": "prisma generate",

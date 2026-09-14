@@ -30,23 +30,23 @@ export class QueueService implements OnModuleDestroy {
   }
 
   async enqueueTranscription(projectId: string, userId: string, videoPath: string) {
-    return this.transcribe.add('transcribe-audio', { projectId, userId, videoPath }, { jobId: `transcribe:${projectId}` });
+    return this.transcribe.add('transcribe-audio', { projectId, userId, videoPath }, { jobId: this.transcribeJobId(projectId) });
   }
 
   async enqueueClipGeneration(clipId: string, projectId: string, userId: string) {
-    return this.clipgen.add('generate-clip', { clipId, projectId, userId }, { jobId: `clipgen:${clipId}` });
+    return this.clipgen.add('generate-clip', { clipId, projectId, userId }, { jobId: this.clipgenJobId(clipId) });
   }
 
   async enqueueAnalysis(projectId: string, userId: string) {
-    return this.analyze.add('analyze-transcript', { projectId, userId }, { jobId: `analyze:${projectId}` });
+    return this.analyze.add('analyze-transcript', { projectId, userId }, { jobId: this.analyzeJobId(projectId) });
   }
 
   async enqueueDownload(projectId: string, userId: string, youtubeUrl: string) {
-    return this.download.add('download-video', { projectId, userId, youtubeUrl }, { jobId: `download:${projectId}` });
+    return this.download.add('download-video', { projectId, userId, youtubeUrl }, { jobId: this.downloadJobId(projectId) });
   }
 
   async getDownloadStatus(projectId: string) {
-    const job = await this.download.getJob(`download:${projectId}`);
+    const job = await this.download.getJob(this.downloadJobId(projectId));
     if (!job) return { projectId, state: 'not_found', progress: 0 };
     return { projectId, state: await job.getState(), progress: job.progress, attemptsMade: job.attemptsMade, failedReason: job.failedReason ?? null };
   }
@@ -57,6 +57,22 @@ export class QueueService implements OnModuleDestroy {
 
   private defaultJobOptions() {
     return { attempts: 3, backoff: { type: 'exponential' as const, delay: 5000 }, removeOnComplete: { age: 86_400, count: 10_000 }, removeOnFail: { age: 604_800, count: 10_000 } };
+  }
+
+  private downloadJobId(projectId: string): string {
+    return `download-${projectId}`;
+  }
+
+  private transcribeJobId(projectId: string): string {
+    return `transcribe-${projectId}`;
+  }
+
+  private analyzeJobId(projectId: string): string {
+    return `analyze-${projectId}`;
+  }
+
+  private clipgenJobId(clipId: string): string {
+    return `clipgen-${clipId}`;
   }
 
   async onModuleDestroy(): Promise<void> {

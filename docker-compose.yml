@@ -11,6 +11,29 @@ version: '3.8'
 
 services:
   # =========================================================================
+  # REVERSE PROXY: NGINX (HTTP 80 / HTTPS 443)
+  # =========================================================================
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: clip-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+      - ./docker/nginx/certbot:/var/www/certbot:ro
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - clip-internal
+
+  # =========================================================================
   # DATABASE: PostgreSQL 16
   # =========================================================================
   postgres:
@@ -46,7 +69,7 @@ services:
       --appendonly yes
       --appendfsync everysec
       --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
+      --maxmemory-policy noeviction
       --requirepass ${REDIS_PASSWORD:-redispass}
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -69,7 +92,6 @@ services:
       context: .
       dockerfile: docker/Dockerfile.api
       target: runner
-    container_name: clip-api
     restart: unless-stopped
     ports:
       - "${API_PORT:-3001}:3001"
@@ -86,7 +108,7 @@ services:
       AI_PROVIDER: ${AI_PROVIDER:-gemini}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
       WHISPER_ENDPOINT: ${WHISPER_ENDPOINT:-http://worker-transcribe:5555}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       RATE_LIMIT_TTL: 60
@@ -118,7 +140,6 @@ services:
       context: .
       dockerfile: docker/Dockerfile.web
       target: runner
-    container_name: clip-web
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-3000}:3000"
@@ -132,7 +153,7 @@ services:
     networks:
       - clip-internal
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -168,7 +189,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2"
+          cpus: "1.5"
           memory: "1G"
 
   # =========================================================================
@@ -187,7 +208,7 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:-redispass}@redis:6379
       STORAGE_LOCAL_PATH: /app/storage
       STORAGE_BUCKET_RAW: raw-videos
-      WHISPER_MODEL: large-v3
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_DEVICE: cpu
       WHISPER_COMPUTE_TYPE: int8
       WHISPER_RUNNER: /app/apps/api/python/faster_whisper_runner.py
@@ -203,8 +224,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4"
-          memory: "6G"
+          cpus: "1.5"
+          memory: "3.5G"
 
   # =========================================================================
   # WORKER: Analyze (OpenAI GPT-4o)
@@ -227,7 +248,8 @@ services:
       AI_PROVIDER: ${AI_PROVIDER:-gemini}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
       OPENAI_MODEL: gpt-4o
       OPENAI_MAX_TOKENS: 4000
     depends_on:
@@ -245,7 +267,6 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.worker-clipgen
-    container_name: clip-worker-clipgen
     restart: unless-stopped
     profiles: ["workers"]
     environment:
@@ -267,10 +288,10 @@ services:
       redis:
         condition: service_healthy
     deploy:
-      replicas: 2
+      replicas: 1
       resources:
         limits:
-          cpus: "2"
+          cpus: "1"
           memory: "1G"
     networks:
       - clip-internal

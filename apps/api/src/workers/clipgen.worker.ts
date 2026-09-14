@@ -31,7 +31,7 @@ async function bootstrap(): Promise<void> {
       await mkdir(directory, { recursive: true });
       const source = await storage.downloadBuffer('raw-videos', rawKey);
       await writeFile(input, source);
-      await ffmpeg.extractClip(input, output, clip.startTime, clip.durationSeconds, false);
+      await ffmpeg.extractClip(input, output, clip.startTime, clip.durationSeconds, true);
       const ass = subtitles.toAss(transcript, clip.startTime, clip.endTime, true);
       const srt = subtitles.toSrt(transcript, clip.startTime, clip.endTime);
       await writeFile(subtitlePath, ass, 'utf8');

@@ -25,7 +25,9 @@ async function bootstrap(): Promise<void> {
       await mkdir(directory, { recursive: true });
       const downloadedPath = await downloader.download(youtubeUrl, directory, (percent) => { void job.updateProgress(percent); });
       const object = await storage.uploadBuffer(userId, 'raw-videos', await readFile(downloadedPath), `${projectId}.mp4`, 'video/mp4');
-      await prisma.project.update({ where: { id: projectId }, data: { status: 'downloaded', metadata: { rawVideoKey: object.key, rawVideoBucket: object.bucket } } });
+      const existingProject = await prisma.project.findUnique({ where: { id: projectId }, select: { metadata: true } });
+      const existingMetadata = existingProject?.metadata && typeof existingProject.metadata === 'object' && !Array.isArray(existingProject.metadata) ? existingProject.metadata : {};
+      await prisma.project.update({ where: { id: projectId }, data: { status: 'downloaded', metadata: { ...existingMetadata, rawVideoKey: object.key, rawVideoBucket: object.bucket } } });
       await queues.enqueueTranscription(projectId, userId, object.key);
       return { projectId, status: 'downloaded' };
     } catch (error) {

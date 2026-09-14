@@ -6,4 +6,9 @@ dist/
 !.env.example
 *.log
 coverage/
+cookies.txt*
+*.tsbuildinfo
+*.pem
+docker/nginx/ssl/
+docker/nginx/certbot/
 .DS_Store

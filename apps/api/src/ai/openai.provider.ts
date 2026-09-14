@@ -17,7 +17,8 @@ export function prompt(): string { return 'Find engaging short-video moments. Re
 
 export function parseSuggestions(content: string | undefined, provider: string): ClipSuggestion[] {
   try {
-    const parsed = JSON.parse(content ?? '{}') as { clips?: ClipSuggestion[] };
+    const cleaned = (content ?? '{}').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    const parsed = JSON.parse(cleaned) as { clips?: ClipSuggestion[] };
     return (parsed.clips ?? []).filter((clip) => Boolean(clip.title && clip.hook && clip.rationale && clip.startTime >= 0 && clip.endTime > clip.startTime && clip.endTime - clip.startTime >= 15 && clip.endTime - clip.startTime <= 90 && clip.score >= 1 && clip.score <= 100));
   } catch { throw new ServiceUnavailableException(`${provider} returned invalid clip suggestions`); }
 }

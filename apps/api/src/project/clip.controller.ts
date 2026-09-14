@@ -26,7 +26,16 @@ export class ClipController {
   async download(@Req() request: Request & { user: AuthenticatedUser }, @Param('id') id: string) {
     const clip = await this.prisma.clip.findFirst({ where: { id, userId: request.user.id } });
     if (!clip || !clip.videoKey) return { error: 'Clip not ready' };
-    return { url: await this.storage.previewUrl(request.user.id, 'clips', clip.videoKey), expiresIn: 3600, filename: `${clip.id}.mp4` };
+    const streamUrl = await this.storage.previewUrl(request.user.id, 'clips', clip.videoKey);
+    return { url: streamUrl, filename: `${clip.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.mp4` };
+  }
+
+  @Get(':id/stream')
+  async stream(@Req() request: Request & { user: AuthenticatedUser }, @Param('id') id: string) {
+    const clip = await this.prisma.clip.findFirst({ where: { id, userId: request.user.id } });
+    if (!clip || !clip.videoKey) return { error: 'Clip not ready' };
+    const streamUrl = await this.storage.previewUrl(request.user.id, 'clips', clip.videoKey);
+    return { url: streamUrl };
   }
 
   @Get(':id/preview')

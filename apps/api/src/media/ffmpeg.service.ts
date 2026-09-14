@@ -10,8 +10,8 @@ export class FfmpegService {
     try { await execFileAsync('ffmpeg', ['-y', '-i', input, '-vf', `ass=${subtitlePath}`, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-c:a', 'copy', '-movflags', '+faststart', output], { timeout: 30 * 60 * 1000 }); } catch { throw new ServiceUnavailableException('FFmpeg subtitle rendering failed'); }
   }
 
-  async extractClip(input: string, output: string, start: number, duration: number, vertical = false): Promise<void> {
-    const filters = vertical ? ['-vf', 'scale=ih*9/16:ih,crop=iw:ih'] : [];
+  async extractClip(input: string, output: string, start: number, duration: number, vertical = true): Promise<void> {
+    const filters = vertical ? ['-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920'] : [];
     try {
       await execFileAsync('ffmpeg', ['-y', '-ss', String(start), '-i', input, '-t', String(duration), ...filters, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-c:a', 'aac', '-movflags', '+faststart', output], { timeout: 30 * 60 * 1000, maxBuffer: 4 * 1024 * 1024 });
     } catch {

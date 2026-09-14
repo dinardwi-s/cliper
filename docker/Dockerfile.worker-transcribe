@@ -12,6 +12,7 @@ RUN corepack enable pnpm && corepack prepare pnpm@latest --activate
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm install --frozen-lockfile --prod=false
+RUN pnpm --filter @clip-project/shared build
 RUN pnpm --filter @clip-project/api prisma:generate
 RUN pnpm --filter @clip-project/api build
 
@@ -20,10 +21,11 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl ffmpeg dumb-init nodejs npm && rm -rf /var/lib/apt/lists/*
 RUN npm install -g corepack && corepack enable pnpm && corepack prepare pnpm@9.15.4 --activate
 RUN pip install --no-cache-dir faster-whisper numpy
-RUN groupadd --system --gid 1001 clipgroup && useradd --system --uid 1001 --gid clipgroup clipuser
+RUN groupadd --system --gid 1001 clipgroup && useradd --system --uid 1001 --gid clipgroup -m clipuser
 COPY --from=builder /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml ./
 COPY --from=builder /app/apps/api/package.json apps/api/
 COPY --from=builder /app/packages/shared/package.json packages/shared/
+COPY --from=builder /app/packages/shared/dist packages/shared/dist/
 COPY --from=builder /app/apps/api/prisma apps/api/prisma/
 COPY --from=builder /app/apps/api/python apps/api/python/
 COPY --from=builder /app/apps/api/dist apps/api/dist/
